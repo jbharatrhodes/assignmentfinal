@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Health Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: sans-serif; background: #f4f6f9; padding: 20px; margin: 0; }
+    h1 { text-align: center; color: #333; margin-bottom: 8px; }
+    .header { display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 8px; }
+    .battery { display: flex; align-items: center; gap: 6px; font-size: 14px; color: #555; background: #fff; border: 1px solid #e0e0e0; border-radius: 20px; padding: 4px 12px; }
+    .battery-icon { position: relative; width: 24px; height: 12px; border: 2px solid #aaa; border-radius: 3px; }
+    .battery-icon::after { content: ''; position: absolute; right: -5px; top: 50%; transform: translateY(-50%); width: 3px; height: 6px; background: #aaa; border-radius: 0 2px 2px 0; }
+    .battery-fill { height: 100%; border-radius: 1px; }
+    .battery-text { font-weight: 600; }
+
+    .day-nav { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 20px; }
+    .day-nav button { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 6px 14px; cursor: pointer; font-size: 14px; }
+    .day-nav button:hover:not(:disabled) { background: #e9ecef; }
+    .day-nav button:disabled { opacity: 0.3; cursor: default; }
+    #dayLabel { font-size: 16px; font-weight: 600; color: #333; min-width: 120px; text-align: center; }
+
+    .tabs { display: flex; gap: 4px; max-width: 900px; margin: 0 auto; border-bottom: 2px solid #e0e0e0; }
+    .tab-btn { padding: 10px 20px; border: none; background: none; cursor: pointer; font-size: 14px; color: #666; border-bottom: 3px solid transparent; margin-bottom: -2px; }
+    .tab-btn:hover { color: #333; }
+    .tab-btn.active { color: #4a90d9; border-bottom-color: #4a90d9; font-weight: 600; }
+
+    .tab-panel { display: none; max-width: 900px; margin: 0 auto; padding-top: 20px; }
+    .tab-panel.active { display: block; }
+
+    .card { background: #fff; border-radius: 10px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 20px; }
+    .card h3 { margin: 0 0 14px; font-size: 13px; color: #555; text-transform: uppercase; letter-spacing: 0.5px; }
+    canvas { max-height: 260px; }
+    .no-data { color: #aaa; text-align: center; padding: 60px 0; font-size: 14px; }
+
+    .sleep-legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; font-size: 12px; color: #555; }
+    .sleep-legend span { display: flex; align-items: center; gap: 5px; }
+    .sleep-legend i { width: 12px; height: 12px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+
+    .sub-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+    .sleep-stats { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+    .sleep-stat { background: #f4f6f9; border-radius: 8px; padding: 10px 16px; text-align: center; flex: 1; min-width: 100px; }
+    .sleep-stat .val { font-size: 18px; font-weight: 700; color: #333; }
+    .sleep-stat .lbl { font-size: 11px; color: #888; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.4px; }
+    .sleep-stat.deep .val { color: #1e3a5f; }
+    .sleep-stat.light .val { color: #4a90d9; }
+    .sleep-stat.rem .val { color: #7ec8e3; }
+
+    @media (max-width: 600px) { .sub-charts { grid-template-columns: 1fr; } .tab-btn { padding: 8px 12px; font-size: 13px; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1 style="margin:0">Health Dashboard</h1>
+    <div class="battery" id="batteryBadge" hidden>
+      <div class="battery-icon"><div class="battery-fill" id="batteryFill"></div></div>
+      <span class="battery-text" id="batteryText"></span>
+    </div>
+  </div>
+
+  <div class="day-nav">
+    <button id="prevDay">&#8592;</button>
+    <span id="dayLabel">—</span>
+    <button id="nextDay">&#8594;</button>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="heartRate">Heart Rate</button>
+    <button class="tab-btn" data-tab="hrv">HRV</button>
+    <button class="tab-btn" data-tab="steps">Steps</button>
+    <button class="tab-btn" data-tab="sleep">Sleep</button>
+  </div>
+
+  <div class="tab-panel active" id="tab-heartRate">
+    <div class="card">
+      <h3>Heart Rate (avg bpm)</h3>
+      <canvas id="heartRate"></canvas>
+      <div id="heartRateEmpty" class="no-data" hidden>No data for this day</div>
+    </div>
+  </div>
+
+  <div class="tab-panel" id="tab-hrv">
+    <div class="card">
+      <h3>HRV</h3>
+      <canvas id="hrv"></canvas>
+      <div id="hrvEmpty" class="no-data" hidden>No data for this day</div>
+    </div>
+  </div>
+
+  <div class="tab-panel" id="tab-steps">
+    <div class="card">
+      <h3>Steps</h3>
+      <canvas id="steps"></canvas>
+      <div id="stepsEmpty" class="no-data" hidden>No data for this day</div>
+    </div>
+  </div>
+
+  <div class="tab-panel" id="tab-sleep">
+    <div class="card">
+      <h3>Sleep Stages — previous night</h3>
+      <div id="sleepStats" class="sleep-stats" hidden>
+        <div class="sleep-stat"><div class="val" id="statStart">—</div><div class="lbl">Sleep Start</div></div>
+        <div class="sleep-stat"><div class="val" id="statEnd">—</div><div class="lbl">Wake Up</div></div>
+        <div class="sleep-stat"><div class="val" id="statTotal">—</div><div class="lbl">Total Sleep</div></div>
+        <div class="sleep-stat deep"><div class="val" id="statDeep">—</div><div class="lbl">Deep</div></div>
+        <div class="sleep-stat light"><div class="val" id="statLight">—</div><div class="lbl">Light</div></div>
+        <div class="sleep-stat rem"><div class="val" id="statRem">—</div><div class="lbl">REM</div></div>
+      </div>
+      <canvas id="sleep"></canvas>
+      <div id="sleepEmpty" class="no-data" hidden>No sleep data for this night</div>
+      <div class="sleep-legend">
+        <span><i style="background:#1e3a5f"></i> Deep (1)</span>
+        <span><i style="background:#4a90d9"></i> Light (2)</span>
+        <span><i style="background:#7ec8e3"></i> REM (3)</span>
+        <span><i style="background:#d4a017"></i> Awake (5)</span>
+      </div>
+    </div>
+    <div class="sub-charts">
+      <div class="card">
+        <h3>Heart Rate during sleep</h3>
+        <canvas id="sleepHR"></canvas>
+        <div id="sleepHREmpty" class="no-data" hidden>No data</div>
+      </div>
+      <div class="card">
+        <h3>HRV during sleep</h3>
+        <canvas id="sleepHRV"></canvas>
+        <div id="sleepHRVEmpty" class="no-data" hidden>No data</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = 'https://nepalifootball.co.uk/api/data';
+    const SLEEP_COLORS = { '1': '#1e3a5f', '2': '#4a90d9', '3': '#7ec8e3', '5': '#d4a017' };
+    const SLEEP_LABELS = { '1': 'Deep', '2': 'Light', '3': 'REM', '5': 'Awake' };
+
+    let allData = {};
+    let availableDays = [];
+    let dayIndex = 0;
+    const charts = {};
+
+    function parseDate(str) {
+      return new Date(str.replace(/\./g, '-').replace(' ', 'T'));
+    }
+    function toDay(str) { return str.replace(/\./g, '-').slice(0, 10); }
+    function shortTime(str) { return str.replace(/\./g, '-').slice(11, 16); }
+    function fmtTime(date) { return date.toTimeString().slice(0, 5); }
+
+    function dedup(items, key = 'date') {
+      const seen = new Set();
+      return items.filter(i => seen.has(i[key]) ? false : seen.add(i[key]));
+    }
+    function sortAsc(items) {
+      return [...items].sort((a, b) => a.date.localeCompare(b.date));
+    }
+    function destroyChart(id) {
+      if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+    }
+    function showCanvas(id, show) {
+      document.getElementById(id).hidden = !show;
+      document.getElementById(id + 'Empty').hidden = show;
+    }
+
+    function renderLine(id, labels, data, color) {
+      destroyChart(id);
+      if (!labels.length) { showCanvas(id, false); return; }
+      showCanvas(id, true);
+      charts[id] = new Chart(document.getElementById(id), {
+        type: 'line',
+        data: { labels, datasets: [{ data, borderColor: color, backgroundColor: color + '22', fill: true, tension: 0.3, pointRadius: 2, borderWidth: 2 }] },
+        options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { maxTicksLimit: 8, maxRotation: 45 } } } }
+      });
+    }
+
+    function renderBar(id, labels, data, color) {
+      destroyChart(id);
+      if (!labels.length) { showCanvas(id, false); return; }
+      showCanvas(id, true);
+      charts[id] = new Chart(document.getElementById(id), {
+        type: 'bar',
+        data: { labels, datasets: [{ data, backgroundColor: color + 'bb', borderColor: color, borderWidth: 1 }] },
+        options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { maxRotation: 45 } } } }
+      });
+    }
+
+    // Expand sleep sessions into a per-minute timeline.
+    // Sessions starting before noon belong to the current day's night (previous night).
+    // Sessions starting at noon or after belong to the next day's night.
+    function buildSleepMinutes(day) {
+      const idx = availableDays.indexOf(day);
+      const prevDay = idx > 0 ? availableDays[idx - 1] : null;
+
+      const sessions = (allData.SLEEP || []).filter(s => {
+        const d = toDay(s.date);
+        const h = parseDate(s.date).getHours();
+        // before noon on this day = woke up this morning (overnight from prev night)
+        if (d === day && h < 12) return true;
+        // afternoon/evening of previous day = went to sleep previous night
+        if (prevDay && d === prevDay && h >= 12) return true;
+        return false;
+      });
+
+      if (!sessions.length) return [];
+
+      // Expand each session: each value in arraySleepQuality = sleepUnitLength minutes
+      const minuteMap = new Map();
+      for (const s of sessions) {
+        const start = parseDate(s.date);
+        const unit = +s.sleepUnitLength || 1;
+        s.arraySleepQuality.split(' ').forEach((stage, idx) => {
+          const t = new Date(start.getTime() + idx * unit * 60000);
+          const key = t.toISOString().slice(0, 16);
+          if (!minuteMap.has(key)) minuteMap.set(key, { time: t, stage });
+        });
+      }
+
+      return [...minuteMap.values()].sort((a, b) => a.time - b.time);
+    }
+
+    function fmtMins(mins) {
+      const h = Math.floor(mins / 60), m = mins % 60;
+      return h > 0 ? `${h}h ${m}m` : `${m}m`;
+    }
+
+    function renderSleepChart(minutes) {
+      destroyChart('sleep');
+      const statsEl = document.getElementById('sleepStats');
+      if (!minutes.length) {
+        showCanvas('sleep', false);
+        statsEl.hidden = true;
+        return;
+      }
+      showCanvas('sleep', true);
+      statsEl.hidden = false;
+
+      // Populate stats
+      const sleepStart = minutes[0].time;
+      const sleepEnd   = minutes[minutes.length - 1].time;
+      const countOf = stage => minutes.filter(m => m.stage === stage).length;
+      const deep = countOf('1'), light = countOf('2'), rem = countOf('3');
+      const total = deep + light + rem;
+
+      document.getElementById('statStart').textContent  = fmtTime(sleepStart);
+      document.getElementById('statEnd').textContent    = fmtTime(sleepEnd);
+      document.getElementById('statTotal').textContent  = fmtMins(total);
+      document.getElementById('statDeep').textContent   = fmtMins(deep);
+      document.getElementById('statLight').textContent  = fmtMins(light);
+      document.getElementById('statRem').textContent    = fmtMins(rem);
+
+      // Label every 30 minutes, empty string otherwise
+      const labels = minutes.map((m, i) => i % 30 === 0 ? fmtTime(m.time) : '');
+      const colors = minutes.map(m => SLEEP_COLORS[m.stage] || '#ccc');
+
+      charts['sleep'] = new Chart(document.getElementById('sleep'), {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            data: minutes.map(() => 1),
+            backgroundColor: colors,
+            borderWidth: 0,
+            barPercentage: 1.0,
+            categoryPercentage: 1.0
+          }]
+        },
+        options: {
+          responsive: true,
+          animation: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                title: (items) => fmtTime(minutes[items[0].dataIndex].time),
+                label: (item) => SLEEP_LABELS[minutes[item.dataIndex].stage] || 'Unknown'
+              }
+            }
+          },
+          scales: {
+            x: { ticks: { maxRotation: 0, autoSkip: false }, grid: { display: false } },
+            y: { display: false }
+          }
+        }
+      });
+    }
+
+    function renderDay(day) {
+      document.getElementById('dayLabel').textContent = day;
+      document.getElementById('prevDay').disabled = dayIndex === 0;
+      document.getElementById('nextDay').disabled = dayIndex === availableDays.length - 1;
+
+      // Heart Rate
+      const hrRaw = (allData.HEART_RATE || [])
+        .filter(i => toDay(i.date) === day)
+        .map(i => {
+          const vals = i.arrayDynamicHR.split(' ').map(Number).filter(v => v > 0);
+          return vals.length ? { date: i.date, value: Math.round(vals.reduce((a, b) => a + b) / vals.length) } : null;
+        }).filter(Boolean);
+      const hrItems = sortAsc(dedup(hrRaw));
+      renderLine('heartRate', hrItems.map(i => shortTime(i.date)), hrItems.map(i => i.value), '#ef4444');
+
+      // HRV
+      const hrvItems = sortAsc(dedup((allData.HRV || []).filter(i => toDay(i.date) === day)));
+      renderLine('hrv', hrvItems.map(i => shortTime(i.date)), hrvItems.map(i => +i.hrv), '#8b5cf6');
+
+      // Steps
+      const stepsItems = dedup((allData.TOTAL_STEPS || []).filter(i => i.date.replace(/\./g, '-') === day), 'date');
+      renderBar('steps', stepsItems.map(i => i.date), stepsItems.map(i => +i.step), '#10b981');
+
+      // Sleep — continuous hypnogram from previous night
+      const sleepMinutes = buildSleepMinutes(day);
+      renderSleepChart(sleepMinutes);
+
+      // Sleep sub-charts: HR and HRV within the sleep window, values > 0 only
+      if (sleepMinutes.length) {
+        const sleepStart = sleepMinutes[0].time;
+        const sleepEnd   = sleepMinutes[sleepMinutes.length - 1].time;
+
+        // Gather HR/HRV from both this day and previous day to cover overnight
+        const idx = availableDays.indexOf(day);
+        const prevDay = idx > 0 ? availableDays[idx - 1] : null;
+        const days = prevDay ? [prevDay, day] : [day];
+
+        const allHrRaw = days.flatMap(d =>
+          (allData.HEART_RATE || []).filter(i => toDay(i.date) === d).map(i => {
+            const vals = i.arrayDynamicHR.split(' ').map(Number).filter(v => v > 0);
+            return vals.length ? { date: i.date, value: Math.round(vals.reduce((a, b) => a + b) / vals.length) } : null;
+          }).filter(Boolean)
+        );
+        const sleepHrItems = sortAsc(dedup(allHrRaw)).filter(i => {
+          const t = parseDate(i.date);
+          return t >= sleepStart && t <= sleepEnd && i.value > 0;
+        });
+        renderLine('sleepHR', sleepHrItems.map(i => shortTime(i.date)), sleepHrItems.map(i => i.value), '#ef4444');
+
+        const allHrvRaw = days.flatMap(d =>
+          (allData.HRV || []).filter(i => toDay(i.date) === d)
+        );
+        const sleepHrvItems = sortAsc(dedup(allHrvRaw)).filter(i => {
+          const t = parseDate(i.date);
+          return t >= sleepStart && t <= sleepEnd && +i.hrv > 0;
+        });
+        renderLine('sleepHRV', sleepHrvItems.map(i => shortTime(i.date)), sleepHrvItems.map(i => +i.hrv), '#8b5cf6');
+      } else {
+        showCanvas('sleepHR', false);
+        showCanvas('sleepHRV', false);
+      }
+    }
+
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+      });
+    });
+
+    document.getElementById('prevDay').addEventListener('click', () => {
+      if (dayIndex > 0) { dayIndex--; renderDay(availableDays[dayIndex]); }
+    });
+    document.getElementById('nextDay').addEventListener('click', () => {
+      if (dayIndex < availableDays.length - 1) { dayIndex++; renderDay(availableDays[dayIndex]); }
+    });
+
+    function showBattery(records) {
+      const rec = records.find(r => r.data_type === 'BATTERY' && typeof r.payload === 'string');
+      if (!rec) return;
+      const match = rec.payload.match(/batteryLevel=(\d+)/);
+      if (!match) return;
+      const pct = +match[1];
+      const color = pct > 50 ? '#22c55e' : pct > 20 ? '#f59e0b' : '#ef4444';
+      document.getElementById('batteryFill').style.cssText = `width:${pct}%;background:${color}`;
+      document.getElementById('batteryText').style.color = color;
+      document.getElementById('batteryText').textContent = pct + '%';
+      document.getElementById('batteryBadge').hidden = false;
+    }
+
+    async function init() {
+      const res = await fetch(API_URL);
+      const records = await res.json();
+
+      showBattery(records);
+
+      for (const record of records) {
+        if (!Array.isArray(record.payload)) continue;
+        if (!allData[record.data_type]) allData[record.data_type] = [];
+        allData[record.data_type].push(...record.payload);
+      }
+
+      const daySet = new Set();
+      (allData.HRV || []).forEach(i => daySet.add(toDay(i.date)));
+      (allData.HEART_RATE || []).forEach(i => daySet.add(toDay(i.date)));
+      (allData.SLEEP || []).forEach(i => daySet.add(toDay(i.date)));
+      (allData.TOTAL_STEPS || []).forEach(i => daySet.add(i.date.replace(/\./g, '-')));
+
+      availableDays = [...daySet].sort();
+      dayIndex = availableDays.length - 1;
+      renderDay(availableDays[dayIndex]);
+    }
+
+    init().catch(err => {
+      console.error('Failed to load data:', err);
+      document.querySelector('h1').textContent = 'Failed to load data. Check console.';
+    });
+  </script>
+</body>
+</html>
